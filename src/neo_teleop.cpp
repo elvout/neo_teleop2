@@ -36,6 +36,8 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include "rclcpp/rclcpp.hpp"
+#include "controller_manager_msgs/srv/switch_controller.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
 using std::placeholders::_1;
@@ -59,6 +61,7 @@ public:
     this->declare_parameter<double>("joy_timeout", 1.);
     this->declare_parameter<int>("grip_button", 1);
     this->declare_parameter<int>("release_button", 2);
+    this->declare_parameter<int>("ur_freedrive_button", 6);
 
     // Get Paramters
     this->get_parameter("scale_linear_x", linear_scale_x);
@@ -72,6 +75,7 @@ public:
     this->get_parameter("joy_timeout", joy_timeout);
     this->get_parameter("grip_button", grip_button);
     this->get_parameter("release_button", release_button);
+    this->get_parameter("ur_freedrive_button", ur_freedrive_button);
 
     vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
     joy_sub = this->create_subscription<sensor_msgs::msg::Joy>(
@@ -79,10 +83,15 @@ public:
       std::bind(&NeoTeleop::joy_callback, this, _1));
 
     // TODO(elvout): services should be params
-    grip_client = this->create_client<std_srvs::srv::Trigger>("/vg10/grip");
-    release_client = this->create_client<std_srvs::srv::Trigger>("/vg10/release");
     // TODO(elvout): wait for services
     // https://docs.ros.org/en/foxy/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Cpp-Service-And-Client.html
+    grip_client = this->create_client<std_srvs::srv::Trigger>("/vg10/grip");
+    release_client = this->create_client<std_srvs::srv::Trigger>("/vg10/release");
+
+    switch_controller_client = this->create_client<controller_manager_msgs::srv::SwitchController>(
+        "/controller_manager/switch_controller");
+    ur_freedrive_keepalive_pub = this->create_publisher<std_msgs::msg::Bool>(
+        "/freedrive_mode_controller/enable_freedrive_mode", 1);
   }
 
   void send_cmd();
@@ -98,6 +107,9 @@ private:
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr grip_client;
   rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr release_client;
 
+  rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ur_freedrive_keepalive_pub;
+
   double linear_scale_x = 0;
   double linear_scale_y = 0;
   double angular_scale_z = 0;
@@ -109,6 +121,7 @@ private:
   int deadman_button = -1;
   int grip_button = -1;
   int release_button = -1;
+  int ur_freedrive_button = -1;
 
   rclcpp::Time last_joy_time;
   double joy_command_x = 0;
@@ -117,6 +130,7 @@ private:
 
   bool is_active = false;
   bool is_deadman_pressed = false;
+  bool is_freedrive_enabled = false;
 };
 
 
@@ -159,6 +173,44 @@ void NeoTeleop::joy_callback(const sensor_msgs::msg::Joy::SharedPtr joy)
     auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
     auto result = release_client->async_send_request(request);
   }
+
+  // TODO(elvout): should probably disable base while in freedrive mode
+  if (is_valid_button(this->ur_freedrive_button)) {
+    const bool ur_freedrive_button_pressed =
+        static_cast<bool>(joy->buttons[this->ur_freedrive_button]);
+
+    if (!this->is_freedrive_enabled && ur_freedrive_button_pressed) {
+      auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+      request->activate_controllers = {"freedrive_mode_controller"};
+      request->deactivate_controllers = {"scaled_joint_trajectory_controller"};
+      request->activate_asap = true;
+      request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+      request->timeout.sec = 1;
+
+      auto result = this->switch_controller_client->async_send_request(
+          request,
+          [this](rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedFuture f) {
+            const auto response = f.get();
+            if (response->ok) {
+              this->is_freedrive_enabled = true;
+            } else {
+              RCLCPP_WARN(this->get_logger(), "Switching to Freedrive failed");
+            }
+          });
+    } else if (this->is_freedrive_enabled && !ur_freedrive_button_pressed) {
+      this->is_freedrive_enabled = false;
+
+      auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+      request->activate_controllers = {"scaled_joint_trajectory_controller"};
+      request->deactivate_controllers = {"freedrive_mode_controller"};
+      request->activate_asap = true;
+      request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+      request->timeout.sec = 1;
+
+      auto result = this->switch_controller_client->async_send_request(request);
+      // TODO(elvout): what if unsuccessful?
+    }
+  }
 }
 
 void NeoTeleop::send_cmd()
@@ -183,6 +235,12 @@ void NeoTeleop::send_cmd()
     }
     // publish
     vel_pub->publish(cmd_vel);
+  }
+
+  if (this->is_freedrive_enabled) {
+    auto true_msg = std_msgs::msg::Bool();
+    true_msg.data = true;
+    this->ur_freedrive_keepalive_pub->publish(true_msg);
   }
 }
 
