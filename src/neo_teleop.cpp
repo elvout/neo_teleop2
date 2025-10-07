@@ -36,6 +36,7 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include "rclcpp/rclcpp.hpp"
+#include "std_srvs/srv/trigger.hpp"
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -56,6 +57,8 @@ public:
     this->declare_parameter<double>("smooth_factor", 0.2);
     this->declare_parameter<int>("deadman_button", 5);
     this->declare_parameter<double>("joy_timeout", 1.);
+    this->declare_parameter<int>("grip_button", 1);
+    this->declare_parameter<int>("release_button", 2);
 
     // Get Paramters
     this->get_parameter("scale_linear_x", linear_scale_x);
@@ -67,11 +70,19 @@ public:
     this->get_parameter("smooth_factor", smooth_factor);
     this->get_parameter("deadman_button", deadman_button);
     this->get_parameter("joy_timeout", joy_timeout);
+    this->get_parameter("grip_button", grip_button);
+    this->get_parameter("release_button", release_button);
 
     vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
     joy_sub = this->create_subscription<sensor_msgs::msg::Joy>(
       "joy", 1,
       std::bind(&NeoTeleop::joy_callback, this, _1));
+
+    // TODO(elvout): services should be params
+    grip_client = this->create_client<std_srvs::srv::Trigger>("/vg10/grip");
+    release_client = this->create_client<std_srvs::srv::Trigger>("/vg10/release");
+    // TODO(elvout): wait for services
+    // https://docs.ros.org/en/foxy/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Cpp-Service-And-Client.html
   }
 
   void send_cmd();
@@ -84,6 +95,9 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub;
   geometry_msgs::msg::Twist cmd_vel;
 
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr grip_client;
+  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr release_client;
+
   double linear_scale_x = 0;
   double linear_scale_y = 0;
   double angular_scale_z = 0;
@@ -93,6 +107,8 @@ private:
   int axis_linear_y = -1;
   int axis_angular_z = -1;
   int deadman_button = -1;
+  int grip_button = -1;
+  int release_button = -1;
 
   rclcpp::Time last_joy_time;
   double joy_command_x = 0;
@@ -106,24 +122,42 @@ private:
 
 void NeoTeleop::joy_callback(const sensor_msgs::msg::Joy::SharedPtr joy)
 {
-  if (deadman_button >= 0 && deadman_button < static_cast<int>(joy->buttons.size())) {
-    is_deadman_pressed = static_cast<bool>(joy->buttons[deadman_button]);
-  } else {
-    is_deadman_pressed = false;
-  }
-  if (is_deadman_pressed) {
-    is_active = true;
-    last_joy_time = rclcpp::Clock().now();
+  const int kNumAxesPresent = static_cast<int>(joy->axes.size());
+  const int kNumButtonsPresent = static_cast<int>(joy->buttons.size());
+
+  const auto is_valid_axis = [&](const int axis) -> bool {
+    return axis >= 0 && axis < kNumAxesPresent;
+  };
+  const auto is_valid_button = [&](const int button) -> bool {
+    return button >= 0 && button < kNumButtonsPresent;
+  };
+
+  this->is_deadman_pressed = is_valid_button(this->deadman_button) &&
+                             static_cast<bool>(joy->buttons[this->deadman_button]);
+  if (this->is_deadman_pressed) {
+    this->is_active = true;
+    this->last_joy_time = rclcpp::Clock().now();
   }
 
-  if (axis_linear_x >= 0 && axis_linear_x < static_cast<int>(joy->axes.size())) {
-    joy_command_x = linear_scale_x * joy->axes[axis_linear_x];
+  if (is_valid_axis(this->axis_linear_x)) {
+    joy_command_x = this->linear_scale_x * joy->axes[this->axis_linear_x];
   }
-  if (axis_linear_y >= 0 && axis_linear_y < static_cast<int>(joy->axes.size())) {
-    joy_command_y = linear_scale_y * joy->axes[axis_linear_y];
+  if (is_valid_axis(this->axis_linear_y)) {
+    joy_command_y = this->linear_scale_y * joy->axes[this->axis_linear_y];
   }
-  if (axis_angular_z >= 0 && axis_angular_z < static_cast<int>(joy->axes.size())) {
-    joy_command_z = angular_scale_z * joy->axes[axis_angular_z];
+  if (is_valid_axis(this->axis_angular_z)) {
+    joy_command_z = this->angular_scale_z * joy->axes[this->axis_angular_z];
+  }
+
+  // TODO(elvout): should check for nullptr / uninit sharedptr
+  // TODO(elvout): is this appropriate? Should we wait for the futures to complete?
+  if (is_valid_button(this->grip_button) && static_cast<bool>(joy->buttons[this->grip_button])) {
+    auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+    auto result = this->grip_client->async_send_request(request);
+  } else if (is_valid_button(this->release_button) &&
+             static_cast<bool>(joy->buttons[this->release_button])) {
+    auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
+    auto result = release_client->async_send_request(request);
   }
 }
 
