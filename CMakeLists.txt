@@ -17,6 +17,7 @@ find_package(trajectory_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(controller_manager_msgs REQUIRED)
+find_package(moveit_servo REQUIRED)
 
 add_executable(neo_teleop2_node src/neo_teleop.cpp)
 
@@ -24,15 +25,20 @@ ament_target_dependencies(neo_teleop2_node
   rclcpp
   sensor_msgs
   geometry_msgs
-  trajectory_msgs
+  trajectory_msgs)
+
+add_executable(ur_teleop_node src/ur_teleop.cpp)
+ament_target_dependencies(ur_teleop_node
+  rclcpp
+  sensor_msgs
   std_srvs
-  controller_manager_msgs)
+  controller_manager_msgs
+  moveit_servo
+)
 
 
-install(TARGETS neo_teleop2_node DESTINATION lib/${PROJECT_NAME})
+install(TARGETS neo_teleop2_node ur_teleop_node DESTINATION lib/${PROJECT_NAME})
 
-install(DIRECTORY launch
-    
-  DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
 
 ament_package()

@@ -36,9 +36,6 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <memory>
 #include "rclcpp/rclcpp.hpp"
-#include "controller_manager_msgs/srv/switch_controller.hpp"
-#include "std_msgs/msg/bool.hpp"
-#include "std_srvs/srv/trigger.hpp"
 
 using std::placeholders::_1;
 using std::placeholders::_2;
@@ -59,9 +56,6 @@ public:
     this->declare_parameter<double>("smooth_factor", 0.2);
     this->declare_parameter<int>("deadman_button", 5);
     this->declare_parameter<double>("joy_timeout", 1.);
-    this->declare_parameter<int>("grip_button", 1);
-    this->declare_parameter<int>("release_button", 2);
-    this->declare_parameter<int>("ur_freedrive_button", 6);
 
     // Get Paramters
     this->get_parameter("scale_linear_x", linear_scale_x);
@@ -73,25 +67,11 @@ public:
     this->get_parameter("smooth_factor", smooth_factor);
     this->get_parameter("deadman_button", deadman_button);
     this->get_parameter("joy_timeout", joy_timeout);
-    this->get_parameter("grip_button", grip_button);
-    this->get_parameter("release_button", release_button);
-    this->get_parameter("ur_freedrive_button", ur_freedrive_button);
 
     vel_pub = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 1);
     joy_sub = this->create_subscription<sensor_msgs::msg::Joy>(
       "joy", 1,
       std::bind(&NeoTeleop::joy_callback, this, _1));
-
-    // TODO(elvout): services should be params
-    // TODO(elvout): wait for services
-    // https://docs.ros.org/en/foxy/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Cpp-Service-And-Client.html
-    grip_client = this->create_client<std_srvs::srv::Trigger>("/vg10/grip");
-    release_client = this->create_client<std_srvs::srv::Trigger>("/vg10/release");
-
-    switch_controller_client = this->create_client<controller_manager_msgs::srv::SwitchController>(
-        "/controller_manager/switch_controller");
-    ur_freedrive_keepalive_pub = this->create_publisher<std_msgs::msg::Bool>(
-        "/freedrive_mode_controller/enable_freedrive_mode", 1);
   }
 
   void send_cmd();
@@ -104,12 +84,6 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub;
   geometry_msgs::msg::Twist cmd_vel;
 
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr grip_client;
-  rclcpp::Client<std_srvs::srv::Trigger>::SharedPtr release_client;
-
-  rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr ur_freedrive_keepalive_pub;
-
   double linear_scale_x = 0;
   double linear_scale_y = 0;
   double angular_scale_z = 0;
@@ -119,9 +93,6 @@ private:
   int axis_linear_y = -1;
   int axis_angular_z = -1;
   int deadman_button = -1;
-  int grip_button = -1;
-  int release_button = -1;
-  int ur_freedrive_button = -1;
 
   rclcpp::Time last_joy_time;
   double joy_command_x = 0;
@@ -130,86 +101,29 @@ private:
 
   bool is_active = false;
   bool is_deadman_pressed = false;
-  bool is_freedrive_enabled = false;
 };
 
 
 void NeoTeleop::joy_callback(const sensor_msgs::msg::Joy::SharedPtr joy)
 {
-  const int kNumAxesPresent = static_cast<int>(joy->axes.size());
-  const int kNumButtonsPresent = static_cast<int>(joy->buttons.size());
-
-  const auto is_valid_axis = [&](const int axis) -> bool {
-    return axis >= 0 && axis < kNumAxesPresent;
-  };
-  const auto is_valid_button = [&](const int button) -> bool {
-    return button >= 0 && button < kNumButtonsPresent;
-  };
-
-  this->is_deadman_pressed = is_valid_button(this->deadman_button) &&
-                             static_cast<bool>(joy->buttons[this->deadman_button]);
-  if (this->is_deadman_pressed) {
-    this->is_active = true;
-    this->last_joy_time = rclcpp::Clock().now();
+  if (deadman_button >= 0 && deadman_button < static_cast<int>(joy->buttons.size())) {
+    is_deadman_pressed = static_cast<bool>(joy->buttons[deadman_button]);
+  } else {
+    is_deadman_pressed = false;
+  }
+  if (is_deadman_pressed) {
+    is_active = true;
+    last_joy_time = rclcpp::Clock().now();
   }
 
-  if (is_valid_axis(this->axis_linear_x)) {
-    joy_command_x = this->linear_scale_x * joy->axes[this->axis_linear_x];
+  if (axis_linear_x >= 0 && axis_linear_x < static_cast<int>(joy->axes.size())) {
+    joy_command_x = linear_scale_x * joy->axes[axis_linear_x];
   }
-  if (is_valid_axis(this->axis_linear_y)) {
-    joy_command_y = this->linear_scale_y * joy->axes[this->axis_linear_y];
+  if (axis_linear_y >= 0 && axis_linear_y < static_cast<int>(joy->axes.size())) {
+    joy_command_y = linear_scale_y * joy->axes[axis_linear_y];
   }
-  if (is_valid_axis(this->axis_angular_z)) {
-    joy_command_z = this->angular_scale_z * joy->axes[this->axis_angular_z];
-  }
-
-  // TODO(elvout): should check for nullptr / uninit sharedptr
-  // TODO(elvout): is this appropriate? Should we wait for the futures to complete?
-  if (is_valid_button(this->grip_button) && static_cast<bool>(joy->buttons[this->grip_button])) {
-    auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
-    auto result = this->grip_client->async_send_request(request);
-  } else if (is_valid_button(this->release_button) &&
-             static_cast<bool>(joy->buttons[this->release_button])) {
-    auto request = std::make_shared<std_srvs::srv::Trigger::Request>();
-    auto result = release_client->async_send_request(request);
-  }
-
-  // TODO(elvout): should probably disable base while in freedrive mode
-  if (is_valid_button(this->ur_freedrive_button)) {
-    const bool ur_freedrive_button_pressed =
-        static_cast<bool>(joy->buttons[this->ur_freedrive_button]);
-
-    if (!this->is_freedrive_enabled && ur_freedrive_button_pressed) {
-      auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
-      request->activate_controllers = {"freedrive_mode_controller"};
-      request->deactivate_controllers = {"scaled_joint_trajectory_controller"};
-      request->activate_asap = true;
-      request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
-      request->timeout.sec = 1;
-
-      auto result = this->switch_controller_client->async_send_request(
-          request,
-          [this](rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedFuture f) {
-            const auto response = f.get();
-            if (response->ok) {
-              this->is_freedrive_enabled = true;
-            } else {
-              RCLCPP_WARN(this->get_logger(), "Switching to Freedrive failed");
-            }
-          });
-    } else if (this->is_freedrive_enabled && !ur_freedrive_button_pressed) {
-      this->is_freedrive_enabled = false;
-
-      auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
-      request->activate_controllers = {"scaled_joint_trajectory_controller"};
-      request->deactivate_controllers = {"freedrive_mode_controller"};
-      request->activate_asap = true;
-      request->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
-      request->timeout.sec = 1;
-
-      auto result = this->switch_controller_client->async_send_request(request);
-      // TODO(elvout): what if unsuccessful?
-    }
+  if (axis_angular_z >= 0 && axis_angular_z < static_cast<int>(joy->axes.size())) {
+    joy_command_z = angular_scale_z * joy->axes[axis_angular_z];
   }
 }
 
@@ -235,12 +149,6 @@ void NeoTeleop::send_cmd()
     }
     // publish
     vel_pub->publish(cmd_vel);
-  }
-
-  if (this->is_freedrive_enabled) {
-    auto true_msg = std_msgs::msg::Bool();
-    true_msg.data = true;
-    this->ur_freedrive_keepalive_pub->publish(true_msg);
   }
 }
 
