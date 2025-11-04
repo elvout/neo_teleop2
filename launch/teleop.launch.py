@@ -68,7 +68,10 @@ def generate_launch_description():
                 package="neo_teleop2",
                 executable="ur_teleop_node",
                 output="screen",
-                name="ur_teleop_node",
+                # TODO: using the "name" kwarg creates a duplicate node in the
+                # graph, but only for this node. The duplicate node has no
+                # associated process.
+                # name="ur_teleop_node",
                 parameters=[
                     ur_teleop_config,
                     moveit_config.robot_description_semantic,

@@ -72,7 +72,7 @@ class URTeleop : public rclcpp::Node {
   std::shared_ptr<moveit_servo::Servo> servo_;
 };
 
-URTeleop::URTeleop() : Node("ur_teleop") {
+URTeleop::URTeleop() : Node("ur_teleop_node") {
   gripper_grip_button_ = this->declare_parameter<int>("gripper_grip_button", 1);
   gripper_release_button_ = this->declare_parameter<int>("gripper_release_button", 2);
   freedrive_deadman_button_ = this->declare_parameter<int>("freedrive_deadman_button", 6);
