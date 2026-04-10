@@ -3,14 +3,18 @@
 ###############################################
 ur_teleop_node:
   ros__parameters:
-    servo_linear_scale: 0.1
-    servo_angular_scale: 0.25
-    servo_twist_smooth_factor: 0.25
+    update_frequency: 500.0
+    servo_linear_scale: 0.4
+    servo_angular_scale: 0.5
+    servo_max_linear_accel: 0.4
+    servo_max_angular_accel: 0.4
+
+    base_movement_mode: none
 
     moveit_servo:
       ## Properties of outgoing commands
-      publish_period: 0.01  # 1/Nominal publish rate [seconds]
-      max_expected_latency: 0.1
+      publish_period: 0.004  # 1/Nominal publish rate [seconds]
+      max_expected_latency: 0.05
 
       ## MoveIt properties
       move_group_name:  ur_manipulator_with_vg10  # Often 'manipulator' or 'arm'

@@ -12,14 +12,14 @@
     <maintainer email="padmanabhan@neobotix.de">Pradheep Padmanabhan</maintainer>
     <license>BSD</license>
     <buildtool_depend>ament_cmake</buildtool_depend>
-    <exec_depend>rclcpp</exec_depend>
-    <exec_depend>rclcpp_action</exec_depend>
-    <exec_depend>rclcpp_lifecycle</exec_depend>
-    <exec_depend>geometry_msgs</exec_depend>
-    <exec_depend>sensor_msgs</exec_depend>
-    <exec_depend>trajectory_msgs</exec_depend>
-    <exec_depend>std_srvs</exec_depend>
-    <exec_depend>controller_manager_msgs</exec_depend>
+    <depend>rclcpp</depend>
+    <depend>geometry_msgs</depend>
+    <depend>sensor_msgs</depend>
+    <depend>std_msgs</depend>
+    <depend>std_srvs</depend>
+    <depend>controller_manager_msgs</depend>
+    <depend>moveit_servo</depend>
+    <depend>moveit_ros_planning_interface</depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
