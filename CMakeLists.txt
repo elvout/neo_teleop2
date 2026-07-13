@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.20)
 project(neo_teleop2)
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 14)
@@ -25,7 +25,14 @@ ament_target_dependencies(neo_teleop2_node
   sensor_msgs
   geometry_msgs)
 
-add_executable(ur_teleop_node src/ur_teleop.cpp)
+add_executable(ur_teleop_node
+  src/ur_teleop/main.cpp
+  src/ur_teleop/ur_teleop_commands.cpp
+  src/ur_teleop/ur_teleop_joy.cpp
+  src/ur_teleop/ur_teleop_moveit.cpp
+  src/ur_teleop/ur_teleop_node.cpp
+)
+target_compile_features(ur_teleop_node PRIVATE cxx_std_23)
 ament_target_dependencies(ur_teleop_node
   rclcpp
   geometry_msgs
